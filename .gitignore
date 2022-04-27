@@ -32,3 +32,4 @@
 *.app
 /.vs/xll_mysql/v17
 /x64/Debug
+/.vs/xll_mysql/v16
