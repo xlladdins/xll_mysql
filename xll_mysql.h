@@ -194,7 +194,7 @@ namespace xll {
 
 	inline bool insert(mysql::connect& db, const char* table, const OPER4& o)
 	{
-		std::vector<MYSQL_BIND> bind;
+		std::vector<OPER4> format;
 		// field type info
 		{
 			std::string sel("select * from ");
@@ -202,62 +202,30 @@ namespace xll {
 			db.query(sel);
 			result res(db);
 			ensure(res.field_count() == o.columns());
-			bind.resize(o.columns());
+			format.resize(o.columns());
 			for (unsigned j = 0; j < o.columns(); ++j) {
-				bind[j].buffer_length = 0;
-				bind[j].is_null = 0;
-				bind[j].buffer_type = res.type(j);
-			}
-		}
-
-		mysql::stmt ins(db);
-
-		std::string sql("insert into ");
-		sql.append(table);
-		sql.append(" values (?");
-		for (unsigned j = 1; j < o.columns(); ++j) {
-			sql.append(", ?");
-		}
-		sql.append(")");
-		ins.prepare(sql);
-
-		for (unsigned i = 0; i < o.rows(); ++i) {
-			MYSQL_TIME t;
-			long l;
-			for (unsigned j = 0; j < o.columns(); ++j) {
-				switch (o(i, j).type()) {
-				case xltypeNum:
-					if (MYSQL_TYPE_DATE == bind[j].buffer_type) {
-						ZeroMemory(&t, sizeof(t));
-						t.year = Excel4(xlfYear, o(i, j)).as_int();
-						t.month = Excel4(xlfMonth, o(i, j)).as_int();
-						t.day = Excel4(xlfDay, o(i, j)).as_int();
-						t.hour = Excel4(xlfHour, o(i, j)).as_int();
-						t.minute = Excel4(xlfMinute, o(i, j)).as_int();
-						t.second = Excel4(xlfSecond, o(i, j)).as_int();
-						bind[j].buffer = &t;
-						bind[j].buffer_type = bind[j].buffer_type;
-						// ensure is date/time type
-					}
-					else if (MYSQL_TYPE_LONG == bind[j].buffer_type) {
-						l = static_cast<long>(o(i, j).as_int());
-						bind[j].buffer = &l;
-					}
-					else {
-						bind[j].buffer = (void*)&o(i, j).val.num;
-					}
-					break;
-				case xltypeStr:
-					bind[j].buffer = o(i, j).val.str + 1;
-					bind[j].buffer_length = o(i, j).val.str[0];
-					break;
-				case xltypeBool:
-					bind[j].buffer = (void*)&o(i, j).val.xbool;
+				format[j] = "General";
+				switch (res.type(j)) {
+				case MYSQL_TYPE_DATE:
+					format[j] = "yyyy-mm-dd";
 					break;
 				}
 			}
-			mysql_stmt_bind_param(ins, &bind[0]);
-			if (0 != ins.execute()) {
+		}
+
+		for (unsigned i = 0; i < o.rows(); ++i) {
+			std::string sql("insert into ");
+			sql.append(table);
+			sql.append(" values (");
+			for (unsigned j = 0; j < o.columns(); ++j) {
+				OPER4 o = Excel4(xlfText, o(i, j), format[j]);
+				if (j != 0) {
+					sql.append(", ");
+				}
+				sql.append(o.val.str + 1, o.val.str[0]);
+			}
+			sql.append(")");
+			if (0 != db.query(sql)) {
 				throw std::runtime_error(mysql_error(db));
 			}
 		}
