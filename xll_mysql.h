@@ -53,100 +53,216 @@ namespace mysql {
 		{
 			return &mysql;
 		}
-		const char* error()
+
+		int query(const std::string& sql)
 		{
-			return mysql_error(&mysql);
+			return mysql_real_query(&mysql, sql.c_str(), static_cast<unsigned long>(sql.length()));
 		}
-		int query(const char* sql)
+	};
+
+	class stmt {
+		MYSQL_STMT* pstmt;
+	public:
+		stmt(MYSQL* db)
+			: pstmt(mysql_stmt_init(db))
 		{
-			return mysql_query(&mysql, sql);
+			if (!pstmt) {
+				throw std::runtime_error(mysql_error(db));
+			}
+		}
+		stmt(const stmt&) = delete;
+		stmt& operator=(const stmt&) = delete;
+		~stmt()
+		{
+			mysql_stmt_close(pstmt);
+		}
+
+		operator MYSQL_STMT* ()
+		{
+			return pstmt;
+		}
+
+		int prepare(const char* str, unsigned long len)
+		{
+			return mysql_stmt_prepare(pstmt, str, len);
+		}
+		int prepare(const std::string& str)
+		{
+			return mysql_stmt_prepare(pstmt, str.c_str(), static_cast<unsigned long>(str.length()));
+		}
+
+		int execute()
+		{
+			return mysql_stmt_execute(pstmt);
+		}
+
+		int fetch()
+		{
+			return mysql_stmt_fetch(pstmt);
+		}
+		int fetch_column(MYSQL_BIND* bind, unsigned int column, unsigned long offset = 0)
+		{
+			return mysql_stmt_fetch_column(pstmt, bind, column, offset);
+		}
+
+		bool bind_param(MYSQL_BIND* bind)
+		{
+			return mysql_stmt_bind_param(pstmt, bind);
+		}
+		bool bind_result(MYSQL_BIND* bind)
+		{
+			return mysql_stmt_bind_result(pstmt, bind);
 		}
 	};
 
 } // namespace mysql
 
 namespace xll {
-#if 0
-	inline OPER4 mysql_to_oper(const MYSQL_FIELD& f)
-	{
-		switch (f.type) {
-			//case MYSQL_TYPE_DECIMAL:
-		case MYSQL_TYPE_TINY:
-			return OPER(static_cast<unsigned char>())
-				MYSQL_TYPE_SHORT,
-				MYSQL_TYPE_LONG,
-				MYSQL_TYPE_FLOAT,
-				MYSQL_TYPE_DOUBLE,
-				MYSQL_TYPE_NULL,
-				MYSQL_TYPE_TIMESTAMP,
-				MYSQL_TYPE_LONGLONG,
-				MYSQL_TYPE_INT24,
-				MYSQL_TYPE_DATE,
-				MYSQL_TYPE_TIME,
-				MYSQL_TYPE_DATETIME,
-				MYSQL_TYPE_YEAR,
-				MYSQL_TYPE_NEWDATE, /**< Internal to MySQL. Not used in protocol */
-				MYSQL_TYPE_VARCHAR,
-				MYSQL_TYPE_BIT,
-				MYSQL_TYPE_TIMESTAMP2,
-				MYSQL_TYPE_DATETIME2,   /**< Internal to MySQL. Not used in protocol */
-				MYSQL_TYPE_TIME2,       /**< Internal to MySQL. Not used in protocol */
-				MYSQL_TYPE_TYPED_ARRAY, /**< Used for replication only */
-				MYSQL_TYPE_JSON = 245,
-				MYSQL_TYPE_NEWDECIMAL = 246,
-				MYSQL_TYPE_ENUM = 247,
-				MYSQL_TYPE_SET = 248,
-				MYSQL_TYPE_TINY_BLOB = 249,
-				MYSQL_TYPE_MEDIUM_BLOB = 250,
-				MYSQL_TYPE_LONG_BLOB = 251,
-				MYSQL_TYPE_BLOB = 252,
-				MYSQL_TYPE_VAR_STRING = 253,
-				MYSQL_TYPE_STRING = 254,
-				MYSQL_TYPE_GEOMETRY = 255
-		}
-	}
-#endif // 0
+
 	std::string to_string(const OPER4& o)
 	{
-		std::string s;
+		unsigned i = 0;
+		ensure(o[i].is_str());
+		std::string str(o[i].val.str + 1, o[i].val.str[0]);
 
-		for (unsigned i = 0; i < o.size(); ++i) {
+		for (i = 1; i < o.size(); ++i) {
 			ensure(o[i].is_str());
-			s.append(o[i].val.str + 1, o[i].val.str[0]);
-			s.append(" ");
+			str.append(" ");
+			str.append(o[i].val.str + 1, o[i].val.str[0]);
 		}
 
-		return s;
+		return str;
 	}
 
-	inline OPER4 query(mysql::connect& db, const char* sql)
+	class result {
+		MYSQL_RES* res;
+	public:
+		result(MYSQL* db)
+			: res(mysql_use_result(db))
+		{ 
+			if (!res) {
+				throw std::runtime_error(mysql_error(db));
+			}
+		}
+		result(const result&) = delete;
+		result& operator=(const result&) = delete;
+		~result()
+		{
+			mysql_free_result(res);
+		}
+
+		auto field_count() const
+		{
+			return res->field_count;
+		}
+		auto type(unsigned i) const
+		{
+			return res->fields[i].type;
+		}
+
+		MYSQL_ROW fetch()
+		{
+			return mysql_fetch_row(res);
+		}
+		OPER4 to_oper(MYSQL_ROW r)
+		{
+			OPER4 o(1, res->field_count);
+
+			for (unsigned i = 0; i < o.size(); ++i) {
+				o[i] = Excel4(xlfValue, OPER4(r[i]));
+				if (o[i].is_err()) {
+					o[i] = OPER4(r[i]);
+				}
+			}
+
+			return o;
+		}
+	};
+
+	inline OPER4 fetch(mysql::connect& db, const std::string& sql/*, const OPER4& params*/)
 	{
 		OPER4 o;
 
-		if (!mysql_query(db, sql)) {
-			throw std::runtime_error(mysql_error(db));
-		}
-		MYSQL_RES* res = mysql_store_result(db);
-		if (!res) {
-			const char* err = mysql_error(db);
-			if (err) {
-				throw std::runtime_error(err);
-			}
-		}
-		else {
-			auto c = mysql_num_fields(res);
-			auto r = mysql_num_rows(res);
-			o.resize((unsigned)r, c);
-			for (unsigned i = 0; i < r; ++i) {
-				MYSQL_ROW ri = mysql_fetch_row(res);
-				MYSQL_FIELD* oi = mysql_fetch_fields(res);
-				for (unsigned j = 0; j < c; ++j) {
-					
-				}
-			}
+		int ret = db.query(sql);
+		result rows(db);
+		while (auto row = rows.fetch()) {
+			o.push_bottom(rows.to_oper(row));
 		}
 
 		return o;
+	}
+
+	inline bool insert(mysql::connect& db, const char* table, const OPER4& o)
+	{
+		std::vector<MYSQL_BIND> bind;
+		// field type info
+		{
+			std::string sel("select * from ");
+			sel.append(table);
+			db.query(sel);
+			result res(db);
+			ensure(res.field_count() == o.columns());
+			bind.resize(o.columns());
+			for (unsigned j = 0; j < o.columns(); ++j) {
+				bind[j].buffer_length = 0;
+				bind[j].is_null = 0;
+				bind[j].buffer_type = res.type(j);
+			}
+		}
+
+		mysql::stmt ins(db);
+
+		std::string sql("insert into ");
+		sql.append(table);
+		sql.append(" values (?");
+		for (unsigned j = 1; j < o.columns(); ++j) {
+			sql.append(", ?");
+		}
+		sql.append(")");
+		ins.prepare(sql);
+
+		for (unsigned i = 0; i < o.rows(); ++i) {
+			MYSQL_TIME t;
+			long l;
+			for (unsigned j = 0; j < o.columns(); ++j) {
+				switch (o(i, j).type()) {
+				case xltypeNum:
+					if (MYSQL_TYPE_DATE == bind[j].buffer_type) {
+						ZeroMemory(&t, sizeof(t));
+						t.year = Excel4(xlfYear, o(i, j)).as_int();
+						t.month = Excel4(xlfMonth, o(i, j)).as_int();
+						t.day = Excel4(xlfDay, o(i, j)).as_int();
+						t.hour = Excel4(xlfHour, o(i, j)).as_int();
+						t.minute = Excel4(xlfMinute, o(i, j)).as_int();
+						t.second = Excel4(xlfSecond, o(i, j)).as_int();
+						bind[j].buffer = &t;
+						bind[j].buffer_type = bind[j].buffer_type;
+						// ensure is date/time type
+					}
+					else if (MYSQL_TYPE_LONG == bind[j].buffer_type) {
+						l = static_cast<long>(o(i, j).as_int());
+						bind[j].buffer = &l;
+					}
+					else {
+						bind[j].buffer = (void*)&o(i, j).val.num;
+					}
+					break;
+				case xltypeStr:
+					bind[j].buffer = o(i, j).val.str + 1;
+					bind[j].buffer_length = o(i, j).val.str[0];
+					break;
+				case xltypeBool:
+					bind[j].buffer = (void*)&o(i, j).val.xbool;
+					break;
+				}
+			}
+			mysql_stmt_bind_param(ins, &bind[0]);
+			if (0 != ins.execute()) {
+				throw std::runtime_error(mysql_error(db));
+			}
+		}
+
+		return true;
 	}
 
 }

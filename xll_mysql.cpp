@@ -52,11 +52,35 @@ LPOPER4 WINAPI xll_mysql_query(HANDLEX h, const LPOPER4 psql)
 		handle<mysql::connect> h_(h);
 		ensure(h_);
 		auto sql = to_string(*psql);
-		if (0 != h_->query(sql.c_str())) {
-			throw std::runtime_error(h_->error());
-		}
-		MYSQL_RES* res = mysql_store_result(*h_);
-		MYSQL_ROW ri = mysql_fetch_row(res);
+		result = fetch(*h_, sql);
+	}
+	catch (std::exception& ex) {
+		XLL_ERROR(ex.what());
+	}
+
+	return &result;
+}
+
+AddIn xai_mysql_insert(
+	Function(XLL_LPOPER4, "xll_mysql_insert", "MYSQL.INSERT")
+	.Arguments({
+		Arg(XLL_HANDLEX, "db", "is a handle to a database connection."),
+		Arg(XLL_CSTRING4, "table", "is the name of a table."),
+		Arg(XLL_LPOPER4, "rows", "are rows of data to insert."),
+		})
+		.Category(CATEGORY)
+	.FunctionHelp("Return the result of a query.")
+	.HelpTopic("https://dev.mysql.com/doc/c-api/8.0/en/mysql-query.html")
+);
+LPOPER4 WINAPI xll_mysql_insert(HANDLEX h, const char* table, const LPOPER4 prows)
+{
+#pragma XLLEXPORT
+	static OPER4 result;
+
+	try {
+		handle<mysql::connect> h_(h);
+		ensure(h_);
+		result = insert(*h_, table, *prows);
 	}
 	catch (std::exception& ex) {
 		XLL_ERROR(ex.what());
